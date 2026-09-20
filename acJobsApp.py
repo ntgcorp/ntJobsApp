@@ -7,6 +7,7 @@ import sys
 import re
 import json
 import configparser
+import subprocess
 import time
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Tuple, Union
@@ -353,6 +354,7 @@ class acJobsApp:
         self.dictJob = {}
         self.dictJobs = {}
         self.sJobEnd = ""
+        self.dictExec: Dict[str, Dict[str, str]] = {}
         self.jLog = acLog()
 
     def Start(self) -> str:
@@ -586,27 +588,125 @@ class acJobsApp:
         print("Eseguita ntjobsapp." + sProc + ": " + sResult)
         if nResult != 0: sys.exit(nResult)
 
+    def Exec(self, sScript: str, dictConfig: Optional[Dict] = None, dictJobs: Optional[Dict] = None, sID: str = "") -> str:
+        """Avvia una ntjobsapp esterna in background.
+
+        Crea il file ntjobsapp_[sID].ini nella cartella dello script e lo
+        lancia come: <python> <sScript> <ntjobsapp_[sID].ini>.
+        L'esito si raccoglie poi con ExecReturn(sID).
+        """
+        sProc = "Exec"
+        sResult = ""
+        try:
+            if not sID or not re.match(r"^[A-Za-z0-9_-]+$", str(sID)):
+                sResult = ErrorProc(f"sID non valido {sID}", sProc)
+                print("Eseguita ntjobsapp." + sProc + ": " + sResult)
+                return sResult
+            if not sScript:
+                sResult = ErrorProc("Script da eseguire non precisato", sProc)
+                print("Eseguita ntjobsapp." + sProc + ": " + sResult)
+                return sResult
+            sScriptNorm = NormalizePath(str(sScript))
+            if not os.path.isfile(sScriptNorm):
+                sResult = ErrorProc(f"Script non esistente {sScriptNorm}", sProc)
+                print("Eseguita ntjobsapp." + sProc + ": " + sResult)
+                return sResult
+            sFolder = os.path.dirname(os.path.abspath(sScriptNorm)) or os.getcwd()
+            sIni = NormalizePath(os.path.join(sFolder, f"ntjobsapp_{sID}.ini"))
+            sEnd = NormalizePath(os.path.join(sFolder, f"ntjobsapp_{sID}.end"))
+            data: Dict[str, Dict[str, str]] = {}
+            cfg: Dict[str, str] = {"TYPE": "NTJOBS.APP.1"}
+            if isinstance(dictConfig, dict):
+                for k, v in dictConfig.items():
+                    cfg[str(k).upper()] = "" if v is None else str(v)
+            data["CONFIG"] = cfg
+            if isinstance(dictJobs, dict):
+                for sec, jobs in dictJobs.items():
+                    sSec = str(sec).upper()
+                    if isinstance(jobs, dict):
+                        data[sSec] = {str(k).upper(): ("" if v is None else str(v)) for k, v in jobs.items()}
+                    elif isinstance(jobs, (list, tuple)):
+                        for idx, job in enumerate(jobs, start=1):
+                            if not isinstance(job, dict):
+                                continue
+                            sSecN = f"{sSec}_{idx:02d}"
+                            data[sSecN] = {str(k).upper(): ("" if v is None else str(v)) for k, v in job.items()}
+            sResult = save_dict_to_ini(data, sIni)
+            if sResult:
+                sResult = ErrorProc(sResult, sProc)
+                print("Eseguita ntjobsapp." + sProc + ": " + sResult)
+                return sResult
+            try:
+                if os.path.isfile(sEnd):
+                    os.remove(sEnd)
+            except Exception:
+                pass
+            try:
+                subprocess.Popen(
+                    [sys.executable, os.path.abspath(sScriptNorm), os.path.abspath(sIni)],
+                    cwd=sFolder,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    close_fds=(os.name != "nt"),
+                )
+            except Exception as e:
+                sResult = ErrorProc(f"Errore avvio script {sScriptNorm}: {e}", sProc)
+                print("Eseguita ntjobsapp." + sProc + ": " + sResult)
+                return sResult
+            self.dictExec[str(sID)] = {"INI": sIni, "END": sEnd, "SCRIPT": os.path.abspath(sScriptNorm), "TS": Timestamp()}
+            self.Log1(f"Eseguita ntjobsapp esterna: {sScriptNorm}, ID: {sID}, File: {sIni}")
+        except Exception as e:
+            sResult = ErrorProc(str(e), sProc)
+        print("Eseguita ntjobsapp." + sProc + ": " + sResult)
+        return sResult
+
+    def ExecReturn(self, sID: str = "", nTimeout: int = 30) -> Dict:
+        """Attende il file ntjobsapp_[sID].end e lo restituisce come dizionario.
+
+        Ritorna {} se entro nTimeout secondi il file non esiste ancora
+        (lavoro non finito). Se finito, ritorna il contenuto del file .end
+        letto e cancella i file .end e .ini.
+        """
+        sProc = "ExecReturn"
+        try:
+            try:
+                nTimeout = int(nTimeout)
+            except Exception:
+                nTimeout = 30
+            if not sID or not re.match(r"^[A-Za-z0-9_-]+$", str(sID)):
+                print("Eseguita ntjobsapp." + sProc + ": " + ErrorProc(f"sID non valido {sID}", sProc))
+                return {"ERROR": f"sID non valido {sID}"}
+            info = self.dictExec.get(str(sID), {})
+            sEnd = info.get("END") or NormalizePath(os.path.join(os.getcwd(), f"ntjobsapp_{sID}.end"))
+            sIni = info.get("INI") or NormalizePath(os.path.join(os.getcwd(), f"ntjobsapp_{sID}.ini"))
+            deadline = time.time() + max(0, nTimeout)
+            while True:
+                if os.path.isfile(sEnd):
+                    break
+                if time.time() >= deadline:
+                    print("Eseguita ntjobsapp." + sProc + ": ")
+                    return {}
+                time.sleep(0.5)
+            time.sleep(0.2)
+            sReadErr, dictResult = read_ini_to_dict(sEnd)
+            if sReadErr:
+                print("Eseguita ntjobsapp." + sProc + ": " + ErrorProc(sReadErr, sProc))
+                return {"ERROR": sReadErr}
+            for f in (sEnd, sIni):
+                try:
+                    if os.path.isfile(f):
+                        os.remove(f)
+                except Exception:
+                    pass
+            self.dictExec.pop(str(sID), None)
+            self.Log1(f"Letto risultato ntjobsapp esterna ID: {sID}, Sezioni: {len(dictResult)}")
+            print("Eseguita ntjobsapp." + sProc + ": ")
+            return dictResult
+        except Exception as e:
+            print("Eseguita ntjobsapp." + sProc + ": " + ErrorProc(str(e), sProc))
+            return {"ERROR": str(e)}
+
     def Log(self, sType: str, sValue: str = ""): self.jLog.Log(sType, sValue)
     def Log0(self, sResult: str, sValue: str = ""): self.jLog.Log0(sResult, sValue)
-    def Log1(self, sValue: str = ""): self.jLog.Log1(sValue)NFIG" in self.dictJobs:
-                for key, value in dictTemp.items():
-                    self.dictJobs["CONFIG"][key] = value
-            else:
-                self.dictJobs["CONFIG"] = dictTemp
-
-            # Fase 3: Salvataggio file .end
-            if self.sJobEnd:
-                sSaveResult = _save_dict_to_ini(self.dictJobs, self.sJobEnd)
-                if sSaveResult == "":
-                    print(f"Creato file {self.sJobEnd}")
-                else:
-                    print(f"Errore salvataggio {self.sJobEnd}: {sSaveResult}")
-
-            # Log fine applicazione
-            self.Log(sResult if sResult else "INFO", f"Fine applicazione {self.sName}")
-
-            return nResult
-
-        except Exception as e:
-            print(f"Errore in End: {str(e)}")
-            return 2
+    def Log1(self, sValue: str = ""): self.jLog.Log1(sValue)

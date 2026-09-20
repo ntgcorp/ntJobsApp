@@ -151,7 +151,37 @@ python mia_app.py SALUTA PARAM.NAME Mario
 
 = comando `SALUTA` + coppie `chiave valore` → sezione `[JOB_01]` con `TYPE=NTJOBS.APP.1`. Il numero di parametri dopo il comando deve essere pari (coppie chiave/valore). Utile per prove veloci.
 
-## 8. Esempio completo
+## 8. Esecuzione di ntJobsApp esterne (`Exec` / `ExecReturn`)
+
+Una ntJobsApp può lanciarne un'altra in **background** e raccoglierne poi il risultato:
+
+```python
+sErr = jData.Exec(
+    sScript="C:/apps/figlia.py",          # script della ntJobsApp esterna
+    dictConfig={"NAME": "FIGLIA", "EXIT": "TRUE"},  # config aggiuntiva (TYPE default NTJOBS.APP.1)
+    dictJobs={"JOB1": {"COMMAND": "SALUTA", "PARAM.NAME": "Mario"}},  # chiave=sezione, valore=dizionario job…
+    sID="lotto1",                          # ID del lancio (lettere/numeri/_/-)
+)
+# …oppure con più job per sezione: dictJobs={"LOTTO": [{"COMMAND": "A"}, {"COMMAND": "B"}]}
+#   → genera le sezioni LOTTO_01, LOTTO_02
+
+import time
+dictResult = {}
+deadline = time.time() + 120
+while not dictResult and time.time() < deadline:
+    dictResult = jData.ExecReturn("lotto1", nTimeout=30)  # {} = non ancora finito
+    # ... fai altro nel frattempo ...
+print(dictResult.get("CONFIG", {}).get("RETURN.TYPE"))  # "E" o "" in caso globale
+```
+
+- **`Exec(sScript, dictConfig, dictJobs, sID)`** — ritorna `""` se il lancio riesce, altrimenti un messaggio di errore. Crea il file **`ntjobsapp_[sID].ini`** nella **cartella dello script** (es. `ntjobsapp_lotto1.ini`) e lo passa come parametro allo script: `python figlia.py ntjobsapp_lotto1.ini`. Il lancio non blocca il chiamante. Sezioni/chiavi convertite in MAIUSCOLO, valori in stringa. Un eventuale `.end` residuo precedente viene cancellato.
+- **`ExecReturn(sID, nTimeout=30)`** — attende fino a `nTimeout` secondi il file **`ntjobsapp_[sID].end`** (controllo ogni 0,5 s):
+  - `{}` (0 chiavi) = **non finito** entro il timeout → richiamala di nuovo;
+  - dizionario con chiavi > 0 = **finito**: contiene il file `.end` letto (stessa struttura del §5). I file `.end` e `.ini` vengono **cancellati** dopo la lettura;
+  - `{"ERROR": "..."}` = `sID` non valido o file `.end` illeggibile (in questo caso i file non vengono cancellati).
+- Lo stato dei lanci è in `jData.dictExec[sID]` (`INI`, `END`, `SCRIPT`, `TS`); se manca (es. programma riavviato), `ExecReturn` cerca il file `.end` nella cartella corrente.
+
+## 9. Esempio completo
 
 ```python
 from acJobsApp import acJobsApp
@@ -175,7 +205,7 @@ if __name__ == "__main__":
         jData.End(jData.Run(cbCommands))
 ```
 
-## 9. Errori comuni
+## 10. Errori comuni
 
 | Sintomo | Causa / soluzione |
 |---|---|
@@ -185,3 +215,5 @@ if __name__ == "__main__":
 | `Type INI non NTJOBSAPP` / `NAME APP non precisato` | `TYPE` deve iniziare con `NTJOBS.APP.`; `NAME` non vuoto |
 | `File richiesto non presente …` | Un `FILE.*` (non `FILE.OUT.*`) non è nella cartella di lancio — ricorda: si verifica il solo nome file, e `$VARIABILI` devono essere definite in `[CONFIG]` |
 | Exit code 1 / 2 | 1 = errore in `Start` (ini/log/config); 2 = errore in uno o più job (vedi `RETURN.TYPE=E` nel `.end`) |
+| `sID non valido …` / `Script non esistente …` (`Exec`) | `sID` solo lettere/numeri/`_`/`-`; `sScript` deve esistere |
+| `ExecReturn` ritorna sempre `{}` | Il figlio non ha ancora scritto il `.end`: richiama con nuovo timeout; verifica che il figlio sia partito e che `TYPE`/`NAME` in `dictConfig` siano validi (vedi `.log` del figlio) |
