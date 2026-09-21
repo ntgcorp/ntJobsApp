@@ -28,6 +28,12 @@ La sezione `[CONFIG]` contiene le impostazioni globali (`TYPE`, `NAME`, `EXIT`, 
 
 **Non devi conoscere i dettagli interni:** ti basta scrivere il file `.ini` e la funzione `cbCommands`.
 
+### Le 3 versioni del framework
+
+Il framework ntJobsApp è fornito in **3 linguaggi**: **Python** (versione principale e più testata, `acJobsApp.py`), **Java** (`acJobsApp.java`, esempio in `test_acJobsApp.java`) e **VBA per Access** (`acJobsApp.cls`, esempio in `test_acJobsApp.bas`). Le tre versioni hanno stesso scopo e stessa struttura: è sufficiente **includere `acJobsApp`** nel tuo progetto e usare il template di utilizzo (`Start → Run → End`, vedi esempio sotto e i manuali).
+
+`aiSys.py` è fornito come libreria di supporto con piccole funzioni di utilità di un altro progetto; alcune di queste funzioni sono **inglobate (copiate) anche in `acJobsApp.py`**, così il file resta unico e senza dipendenze esterne.
+
 ### Dove andare adesso (manuali utente)
 
 | File | Contenuto |
@@ -96,6 +102,12 @@ Each section of the `.ini` file (except `[CONFIG]`) is a **job**: it holds a `CO
 The `[CONFIG]` section holds global settings (`TYPE`, `NAME`, `EXIT`, `LOG`) and reusable **`$NAME` variables** usable in every job (e.g. `FILE.IN=$BASE_DIR\input.csv`).
 
 **You don't need to know the internals:** just write the `.ini` file and the `cbCommands` function.
+
+### The 3 language versions
+
+The ntJobsApp framework ships in **3 languages**: **Python** (main and most tested version, `acJobsApp.py`), **Java** (`acJobsApp.java`, example in `test_acJobsApp.java`) and **VBA for Access** (`acJobsApp.cls`, example in `test_acJobsApp.bas`). All three share the same purpose and structure: just **include `acJobsApp`** in your project and follow the usage template (`Start → Run → End`, see example above and the manuals).
+
+`aiSys.py` ships as a support library with small utility functions from another project; some of those functions are also **embedded (copied) into `acJobsApp.py`**, so the file stays single and dependency-free.
 
 ### Where to go next (user manuals)
 

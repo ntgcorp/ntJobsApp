@@ -13,6 +13,8 @@ Una **ntJobsApp** è un programma batch che:
 
 La classe **`acJobsApp`** (file `acJobsApp.py`) fa da orchestratore. Tu la usi tramite la variabile globale **`jData`**.
 
+> Il framework esiste in **3 linguaggi** (vedi §11): Python (`acJobsApp.py`, versione principale e più testata), Java (`acJobsApp.java`) e VBA per Access (`acJobsApp.cls`).
+
 ## 2. Il ciclo di vita (sempre uguale)
 
 ```python
@@ -217,3 +219,17 @@ if __name__ == "__main__":
 | Exit code 1 / 2 | 1 = errore in `Start` (ini/log/config); 2 = errore in uno o più job (vedi `RETURN.TYPE=E` nel `.end`) |
 | `sID non valido …` / `Script non esistente …` (`Exec`) | `sID` solo lettere/numeri/`_`/`-`; `sScript` deve esistere |
 | `ExecReturn` ritorna sempre `{}` | Il figlio non ha ancora scritto il `.end`: richiama con nuovo timeout; verifica che il figlio sia partito e che `TYPE`/`NAME` in `dictConfig` siano validi (vedi `.log` del figlio) |
+
+## 11. Il framework in 3 linguaggi e la libreria aiSys
+
+Il framework ntJobsApp è fornito in **3 versioni di linguaggi**, con stesso scopo e stessa struttura:
+
+| Linguaggio | File da includere | Esempio | Note |
+|---|---|---|---|
+| **Python** (principale e più testata) | `acJobsApp.py` (file unico, zero dipendenze) | vedi §9 | `from acJobsApp import acJobsApp`, esito job con `Return()` |
+| **Java** | `acJobsApp.java` (solo libreria standard) | `test_acJobsApp.java` | `Return()` si chiama `jobReturn()` (`return` è parola riservata); `End()` restituisce il codice `0/1/2` |
+| **VBA per Access** | `acJobsApp.cls` (classe, nessun riferimento richiesto) | `test_acJobsApp.bas` | `Return()` si chiama `JobReturn()`; `Run("NomeCallback")` via `Application.Run`; `End()` restituisce `0/1/2` |
+
+In tutti i casi è sufficiente **includere `acJobsApp`** nel progetto e usare il **template di utilizzo**: `Start → Run → End` con la tua funzione di callback che registra ogni esito (`Return`/`jobReturn`/`JobReturn`).
+
+`aiSys.py` è fornito come **libreria di supporto** con piccole funzioni di utilità di un **altro progetto**; alcune di queste funzioni sono **inglobate (copiate) anche in `acJobsApp.py`**, così la versione Python resta un file unico senza dipendenze esterne. I manuali `aiSys_man_it.md` / `aiSys_man_en.md` descrivono l'uso di `aiSys` come libreria a sé.

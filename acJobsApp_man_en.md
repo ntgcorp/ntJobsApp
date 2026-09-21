@@ -13,6 +13,8 @@ An **ntJobsApp** is a batch program that:
 
 The **`acJobsApp`** class (`acJobsApp.py`) is the orchestrator. You use it through the global variable **`jData`**.
 
+> The framework ships in **3 languages** (see §11): Python (`acJobsApp.py`, main and most tested version), Java (`acJobsApp.java`) and VBA for Access (`acJobsApp.cls`).
+
 ## 2. The lifecycle (always the same)
 
 ```python
@@ -217,3 +219,17 @@ if __name__ == "__main__":
 | Exit code 1 / 2 | 1 = `Start` error (ini/log/config); 2 = error in one or more jobs (see `RETURN.TYPE=E` in the `.end`) |
 | `sID non valido …` / `Script non esistente …` (`Exec`) | `sID` letters/digits/`_`/`-` only; `sScript` must exist |
 | `ExecReturn` always returns `{}` | The child has not written the `.end` yet: call again with a fresh timeout; check the child started and `TYPE`/`NAME` in `dictConfig` are valid (see the child `.log`) |
+
+## 11. The framework in 3 languages and the aiSys library
+
+The ntJobsApp framework ships in **3 language versions**, sharing the same purpose and structure:
+
+| Language | File to include | Example | Notes |
+|---|---|---|---|
+| **Python** (main and most tested) | `acJobsApp.py` (single file, zero dependencies) | see §9 | `from acJobsApp import acJobsApp`, job outcome with `Return()` |
+| **Java** | `acJobsApp.java` (standard library only) | `test_acJobsApp.java` | `Return()` is named `jobReturn()` (`return` is a reserved word); `End()` returns the `0/1/2` code |
+| **VBA for Access** | `acJobsApp.cls` (class, no references required) | `test_acJobsApp.bas` | `Return()` is named `JobReturn()`; `Run("CallbackName")` via `Application.Run`; `End()` returns `0/1/2` |
+
+In every case just **include `acJobsApp`** in your project and follow the **usage template**: `Start → Run → End` with your callback function recording each outcome (`Return`/`jobReturn`/`JobReturn`).
+
+`aiSys.py` ships as a **support library** with small utility functions from **another project**; some of those functions are also **embedded (copied) into `acJobsApp.py`**, so the Python version stays a single dependency-free file. The `aiSys_man_it.md` / `aiSys_man_en.md` manuals describe using `aiSys` as a standalone library.
