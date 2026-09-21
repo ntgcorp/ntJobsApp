@@ -226,9 +226,11 @@ Il framework ntJobsApp è fornito in **3 versioni di linguaggi**, con stesso sco
 
 | Linguaggio | File da includere | Esempio | Note |
 |---|---|---|---|
-| **Python** (principale e più testata) | `acJobsApp.py` (file unico, zero dipendenze) | vedi §9 | `from acJobsApp import acJobsApp`, esito job con `Return()` |
+| **Python** (principale e più testata) | `acJobsApp.py` (file unico, zero dipendenze) | vedi §9 e `test_acJobsApp.py` | `from acJobsApp import acJobsApp`, esito job con `Return()` |
 | **Java** | `acJobsApp.java` (solo libreria standard) | `test_acJobsApp.java` | `Return()` si chiama `jobReturn()` (`return` è parola riservata); `End()` restituisce il codice `0/1/2` |
 | **VBA per Access** | `acJobsApp.cls` (classe, nessun riferimento richiesto) | `test_acJobsApp.bas` | `Return()` si chiama `JobReturn()`; `Run("NomeCallback")` via `Application.Run`; `End()` restituisce `0/1/2` |
+
+Gli esempi `test_acJobsApp.*` usano il file condiviso `test_acJobsApp.ini` (non lo creano): JOB1 con `COMMAND=SHELL` + `PARAM.CMD` (comando shell di esempio), JOB2 con `COMMAND` eseguito direttamente come shell.
 
 In tutti i casi è sufficiente **includere `acJobsApp`** nel progetto e usare il **template di utilizzo**: `Start → Run → End` con la tua funzione di callback che registra ogni esito (`Return`/`jobReturn`/`JobReturn`).
 

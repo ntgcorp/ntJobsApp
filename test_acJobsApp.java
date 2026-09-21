@@ -2,47 +2,60 @@
 // Compilazione ed esecuzione (serve un JDK):
 //   javac acJobsApp.java test_acJobsApp.java
 //   java test_acJobsApp
-// L'esempio: crea un file .ini di prova, esegue 2 job (SALUTA e SOMMA),
-// scrive il file .end, mostra un poll execReturn con timeout breve e ripulisce.
+// Usa il file condiviso test_acJobsApp.ini (NON lo crea, NON lo cancella):
+// esegue i job con Start -> Run -> End e pulisce solo .end e .log generati.
+// La callback supporta COMMAND=SHELL (esegue PARAM.CMD) e, in alternativa,
+// esegue direttamente il valore di COMMAND come comando di shell
+// (es. COMMAND=cmd.exe /c dir *.* /b).
 
+import java.io.BufferedReader;
 import java.io.File;
-import java.util.LinkedHashMap;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 public class test_acJobsApp {
 
+    private static final int MAX_OUT = 2000;
+
+    /** Esegue un comando di shell, ritorna {errore, output}. */
+    private static String[] runShell(String sCmd, String sWorkDir) {
+        try {
+            String os = System.getProperty("os.name", "").toLowerCase();
+            List<String> cmd = new ArrayList<String>();
+            if (os.contains("win")) { cmd.add("cmd.exe"); cmd.add("/c"); cmd.add(sCmd); }
+            else { cmd.add("/bin/sh"); cmd.add("-c"); cmd.add(sCmd); }
+            Process p = new ProcessBuilder(cmd).directory(new File(sWorkDir))
+                    .redirectErrorStream(true).start();
+            StringBuilder sb = new StringBuilder();
+            BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8));
+            try {
+                String line;
+                while ((line = r.readLine()) != null) sb.append(line).append("\n");
+            } finally { r.close(); }
+            int nExit = p.waitFor();
+            String sOut = sb.toString();
+            if (sOut.length() > MAX_OUT) sOut = sOut.substring(0, MAX_OUT);
+            if (nExit != 0) return new String[]{"exit=" + nExit, sOut};
+            return new String[]{"", sOut};
+        } catch (Exception e) {
+            return new String[]{"Errore shell: " + e.getMessage(), ""};
+        }
+    }
+
     public static void main(String[] args) {
-        // --- 1. Funzioni di supporto ---
-        System.out.println("Timestamp : " + acJobsApp.timestamp());
-        System.out.println("Expand    : " + acJobsApp.expand("Ciao $USER da $SYS.OS",
-                new LinkedHashMap<String, String>() {{ put("USER", "Mario"); }}));
-        System.out.println("Bool TRUE : " + acJobsApp.stringBool("TRUE"));
+        String sBase = System.getProperty("user.dir", ".");
+        final String sWorkDir = sBase;
+        String sIni = args.length > 0 ? args[0]
+                : acJobsApp.normalizePath(new File(sBase, "test_acJobsApp.ini").getPath());
+        if (!new File(sIni).isFile()) {
+            System.out.println("File di prova non trovato: " + sIni);
+            return;
+        }
 
-        // --- 2. Crea un file .ini di prova (solo PARAM.*, nessun FILE.* richiesto) ---
-        String sIni = acJobsApp.normalizePath(new File(System.getProperty("user.dir", "."), "test_lavoro.ini").getPath());
-        Map<String, Map<String, String>> data = new LinkedHashMap<String, Map<String, String>>();
-        Map<String, String> cfg = new LinkedHashMap<String, String>();
-        cfg.put("TYPE", "NTJOBS.APP.1.0");
-        cfg.put("NAME", "DEMO_JAVA");
-        cfg.put("EXIT", "TRUE");
-        cfg.put("LOG", "test_demo.log");
-        cfg.put("BASE_DIR", "C:\\dati");
-        data.put("CONFIG", cfg);
-        Map<String, String> job1 = new LinkedHashMap<String, String>();
-        job1.put("COMMAND", "SALUTA");
-        job1.put("PARAM.NAME", "Mario");
-        job1.put("PARAM.DIR", "$BASE_DIR");
-        data.put("JOB1", job1);
-        Map<String, String> job2 = new LinkedHashMap<String, String>();
-        job2.put("COMMAND", "SOMMA");
-        job2.put("PARAM.A", "40");
-        job2.put("PARAM.B", "2");
-        data.put("JOB2", job2);
-        String sErr = acJobsApp.saveDictToIni(data, sIni);
-        if (sErr != null && !sErr.isEmpty()) { System.out.println("Errore scrittura ini: " + sErr); return; }
-
-        // --- 3. Ciclo di vita: Start -> Run -> End ---
-        acJobsApp jData = new acJobsApp();
+        final acJobsApp jData = new acJobsApp();
         String sResult = jData.start(new String[]{sIni});
         int nExit;
         if (sResult != null && !sResult.isEmpty()) {
@@ -50,49 +63,25 @@ public class test_acJobsApp {
         } else {
             nExit = jData.end(jData.run(dJob -> {
                 String sCmd = dJob.containsKey("COMMAND") ? dJob.get("COMMAND") : "";
-                if ("SALUTA".equals(sCmd)) {
-                    String sNome = dJob.containsKey("PARAM.NAME") ? dJob.get("PARAM.NAME") : "mondo";
-                    return jData.jobReturn("", "Ciao " + sNome + "!");
+                if ("SHELL".equals(sCmd)) {
+                    String sShell = dJob.containsKey("PARAM.CMD") ? dJob.get("PARAM.CMD") : "";
+                    if (sShell == null || sShell.isEmpty()) return jData.jobReturn("PARAM.CMD mancante", "");
+                    String[] res = runShell(sShell, sWorkDir);
+                    return jData.jobReturn(res[0], res[1]);
                 }
-                if ("SOMMA".equals(sCmd)) {
-                    try {
-                        int a = Integer.parseInt(dJob.get("PARAM.A").trim());
-                        int b = Integer.parseInt(dJob.get("PARAM.B").trim());
-                        return jData.jobReturn("", "Somma=" + (a + b));
-                    } catch (Exception e) {
-                        return jData.jobReturn("Parametri non numerici", "");
-                    }
+                if (sCmd != null && !sCmd.isEmpty()) {
+                    String[] res = runShell(sCmd, sWorkDir);
+                    return jData.jobReturn(res[0], res[1]);
                 }
-                return jData.jobReturn("Comando sconosciuto: " + sCmd, "");
+                return jData.jobReturn("COMMAND mancante", "");
             }));
         }
         System.out.println("Exit code: " + nExit);
 
-        // --- 4. Leggi il file .end e mostra l'esito globale ---
-        String sEnd = sIni.substring(0, sIni.lastIndexOf('.')) + ".end";
-        acJobsApp.IniRead rd = acJobsApp.readIniToDict(sEnd);
-        if (rd.err == null || rd.err.isEmpty()) {
-            Map<String, String> endCfg = rd.data.get("CONFIG");
-            System.out.println("END CONFIG RETURN.TYPE  = " + (endCfg != null ? endCfg.get("RETURN.TYPE") : "?"));
-            System.out.println("END JOB1 RETURN.VALUE   = " + rd.data.get("JOB1").get("RETURN.VALUE"));
-            System.out.println("END JOB2 RETURN.VALUE   = " + rd.data.get("JOB2").get("RETURN.VALUE"));
-        }
-
-        // --- 5. execReturn con timeout breve su ID inesistente -> mappa vuota (non finito) ---
-        Map<String, Map<String, String>> pending = jData.execReturn("id_inesistente_xyz", 1);
-        System.out.println("execReturn su ID inesistente, chiavi=" + pending.size() + " (0 = non finito, atteso)");
-
-        // Esempio di lancio reale (decommentare con uno script esistente):
-        // String sLaunch = jData.exec("C:/apps/figlia.py",
-        //         new LinkedHashMap<String, String>() {{ put("NAME", "FIGLIA"); }},
-        //         new LinkedHashMap<String, Object>() {{ put("JOB1", new LinkedHashMap<String, String>() {{ put("COMMAND", "SALUTA"); }}); }},
-        //         "lotto1");
-        // Map<String, Map<String, String>> dictResult = jData.execReturn("lotto1", 30);
-
-        // --- 6. Pulizia file di prova ---
-        new File(sIni).delete();
-        new File(sEnd).delete();
-        new File("test_demo.log").delete();
+        // Pulizia dei soli artefatti generati (l'ini condiviso resta)
+        int dot = sIni.lastIndexOf('.');
+        new File(dot >= 0 ? sIni.substring(0, dot) + ".end" : sIni + ".end").delete();
+        new File(sBase, "test_acJobsApp.log").delete();
         System.out.println("Test completato.");
     }
 }

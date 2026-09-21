@@ -2,63 +2,71 @@ Attribute VB_Name = "test_acJobsApp"
 '==============================================================================
 ' test_acJobsApp.bas - Esempio d'uso della classe acJobsApp (MS Access)
 ' Importare in Access: acJobsApp.cls (classe) + questo modulo standard.
+' Usa il file condiviso test_acJobsApp.ini nella stessa cartella del progetto
+' (NON lo crea, NON lo cancella): Start -> Run -> End, poi pulisce .end e .log.
 ' Esecuzione: aprire la finestra Immediata (CTRL+G) e lanciare Test_Lifecycle.
 ' Niente riferimenti richiesti (late binding).
 '==============================================================================
 Option Explicit
 
+Private Const MAX_OUT As Long = 2000
+
 Private mApp As acJobsApp ' istanza corrente, usata dalla callback per JobReturn
+Private mWorkDir As String
+
+'--- Esegue un comando di shell, output in ByRef. Ritorna "" se ok. ---
+Private Function RunShell(ByVal sCmd As String, ByRef sOut As String) As String
+    On Error GoTo Eh
+    Dim sh As Object: Set sh = CreateObject("WScript.Shell")
+    sh.CurrentDirectory = mWorkDir
+    Dim ex As Object: Set ex = sh.Exec(sCmd)
+    Do While ex.Status = 0
+        DoEvents
+    Loop
+    sOut = ex.StdOut.ReadAll()
+    Dim sErr As String: sErr = ex.StdErr.ReadAll()
+    If sErr <> "" Then sOut = sOut & sErr
+    If Len(sOut) > MAX_OUT Then sOut = Left(sOut, MAX_OUT)
+    If ex.ExitCode <> 0 Then RunShell = "exit=" & ex.ExitCode Else RunShell = ""
+    Exit Function
+Eh:
+    sOut = ""
+    RunShell = "Errore shell: " & Err.Description
+End Function
 
 '--- Callback dei job: nome passato a Run(). Riceve il Dictionary del job. ---
+' Supporta COMMAND=SHELL (esegue PARAM.CMD) e, in alternativa, esegue
+' direttamente il valore di COMMAND come comando di shell
+' (es. COMMAND=cmd.exe /c dir *.* /b).
 Public Function TestCb_Job(ByVal dJob As Object) As String
     Dim sCmd As String: sCmd = ""
     If dJob.Exists("COMMAND") Then sCmd = CStr(dJob("COMMAND"))
-    If sCmd = "SALUTA" Then
-        Dim sNome As String: sNome = "mondo"
-        If dJob.Exists("PARAM.NAME") Then sNome = CStr(dJob("PARAM.NAME"))
-        TestCb_Job = mApp.JobReturn("", "Ciao " & sNome & "!")
-    ElseIf sCmd = "SOMMA" Then
-        On Error GoTo NumErr
-        Dim a As Long: a = CLng(Trim(CStr(dJob("PARAM.A"))))
-        Dim b As Long: b = CLng(Trim(CStr(dJob("PARAM.B"))))
-        TestCb_Job = mApp.JobReturn("", "Somma=" & (a + b))
+    If sCmd = "SHELL" Then
+        Dim sShell As String: sShell = ""
+        If dJob.Exists("PARAM.CMD") Then sShell = CStr(dJob("PARAM.CMD"))
+        If sShell = "" Then TestCb_Job = mApp.JobReturn("PARAM.CMD mancante", ""): Exit Function
+        Dim sOut1 As String
+        Dim sErr1 As String: sErr1 = RunShell(sShell, sOut1)
+        TestCb_Job = mApp.JobReturn(sErr1, sOut1)
+    ElseIf sCmd <> "" Then
+        Dim sOut2 As String
+        Dim sErr2 As String: sErr2 = RunShell(sCmd, sOut2)
+        TestCb_Job = mApp.JobReturn(sErr2, sOut2)
     Else
-        TestCb_Job = mApp.JobReturn("Comando sconosciuto: " & sCmd, "")
+        TestCb_Job = mApp.JobReturn("COMMAND mancante", "")
     End If
-    Exit Function
-NumErr:
-    TestCb_Job = mApp.JobReturn("Parametri non numerici", "")
 End Function
 
-'--- Ciclo di vita completo: crea .ini di prova, Start -> Run -> End ---
+'--- Ciclo di vita: usa test_acJobsApp.ini, Start -> Run -> End ---
 Public Sub Test_Lifecycle()
-    Dim sIni As String: sIni = CurrentProject.Path & "\test_lavoro.ini"
-
-    ' 1. Costruisci il file .ini di prova (solo PARAM.*, nessun FILE.* richiesto)
-    Dim data As Object: Set data = CreateObject("Scripting.Dictionary")
-    Dim cfg As Object: Set cfg = CreateObject("Scripting.Dictionary")
-    cfg.Add "TYPE", "NTJOBS.APP.1.0"
-    cfg.Add "NAME", "DEMO_VBA"
-    cfg.Add "EXIT", "TRUE"
-    cfg.Add "LOG", "test_demo.log"
-    cfg.Add "BASE_DIR", "C:\dati"
-    data.Add "CONFIG", cfg
-    Dim j1 As Object: Set j1 = CreateObject("Scripting.Dictionary")
-    j1.Add "COMMAND", "SALUTA"
-    j1.Add "PARAM.NAME", "Mario"
-    j1.Add "PARAM.DIR", "$BASE_DIR"
-    data.Add "JOB1", j1
-    Dim j2 As Object: Set j2 = CreateObject("Scripting.Dictionary")
-    j2.Add "COMMAND", "SOMMA"
-    j2.Add "PARAM.A", "40"
-    j2.Add "PARAM.B", "2"
-    data.Add "JOB2", j2
+    mWorkDir = CurrentProject.Path
+    Dim sIni As String: sIni = mWorkDir & "\test_acJobsApp.ini"
+    If Dir(sIni) = "" Then
+        Debug.Print "File di prova non trovato: " & sIni
+        Exit Sub
+    End If
 
     Set mApp = New acJobsApp
-    Dim w As String: w = mApp.SaveDictToIni(data, sIni)
-    If w <> "" Then Debug.Print "Errore scrittura ini: " & w: Exit Sub
-
-    ' 2. Start -> Run -> End
     Dim sRes As String: sRes = mApp.Start(sIni)
     Dim nExit As Long
     If sRes <> "" Then
@@ -68,38 +76,20 @@ Public Sub Test_Lifecycle()
     End If
     Debug.Print "Exit code: " & nExit ' 0 atteso
 
-    ' 3. Rileggi il .end e mostra gli esiti
-    Dim sEnd As String: sEnd = CurrentProject.Path & "\test_lavoro.end"
+    ' Rileggi il .end e mostra gli esiti
+    Dim sEnd As String: sEnd = mWorkDir & "\test_acJobsApp.end"
     Dim rd As Object
     Dim rErr As String: rErr = mApp.ReadIniToDict(sEnd, rd)
     If rErr = "" Then
         Debug.Print "END CONFIG RETURN.TYPE = " & CStr(rd("CONFIG")("RETURN.TYPE"))
-        Debug.Print "END JOB1 RETURN.VALUE  = " & CStr(rd("JOB1")("RETURN.VALUE"))
-        Debug.Print "END JOB2 RETURN.VALUE  = " & CStr(rd("JOB2")("RETURN.VALUE"))
+        Debug.Print "END JOB1 RETURN.TYPE   = " & CStr(rd("JOB1")("RETURN.TYPE"))
+        Debug.Print "END JOB2 RETURN.TYPE   = " & CStr(rd("JOB2")("RETURN.TYPE"))
     End If
 
-    ' 4. ExecReturn con timeout breve su ID inesistente -> 0 chiavi (non finito)
-    Dim pend As Object: Set pend = mApp.ExecReturn("id_inesistente_xyz", 1)
-    Debug.Print "execReturn ID inesistente, chiavi=" & pend.Count & " (0 = non finito, atteso)"
-
-    ' Esempio di lancio reale (decommentare con uno script esistente):
-    ' Dim cfg2 As Object: Set cfg2 = CreateObject("Scripting.Dictionary")
-    ' cfg2.Add "NAME", "FIGLIA"
-    ' Dim jobs As Object: Set jobs = CreateObject("Scripting.Dictionary")
-    ' Dim jj As Object: Set jj = CreateObject("Scripting.Dictionary")
-    ' jj.Add "COMMAND", "SALUTA": jobs.Add "JOB1", jj
-    ' Debug.Print "Exec: " & mApp.Exec("C:\apps\figlia.py", cfg2, jobs, "lotto1")
-    ' Dim res As Object
-    ' Do
-    '     Set res = mApp.ExecReturn("lotto1", 30)
-    '     DoEvents
-    ' Loop While res.Count = 0
-
-    ' 5. Pulizia
+    ' Pulizia dei soli artefatti generati (l'ini condiviso resta)
     On Error Resume Next
-    Kill sIni
     Kill sEnd
-    Kill CurrentProject.Path & "\test_demo.log"
+    Kill mWorkDir & "\test_acJobsApp.log"
     On Error GoTo 0
     Set mApp = Nothing
     Debug.Print "Test completato."
